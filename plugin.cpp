@@ -322,11 +322,11 @@ AuthResult Authentication::aclCheck(Publish &publishData, AclAccess access)
     if (publishData.client_id.empty())
         return AuthResult::success;
 
-    return aclCheck(publishData.client_id, publishData.username, publishData.topic, publishData.getSubtopics(), access, publishData.qos,
+    return aclCheck(publishData.client_id, publishData.username, publishData.topic, publishData.getSubtopics(), publishData.payload, access, publishData.qos,
                     publishData.retain, publishData.getUserProperties());
 }
 
-AuthResult Authentication::aclCheck(const std::string &clientid, const std::string &username, const std::string &topic, const std::vector<std::string> &subtopics,
+AuthResult Authentication::aclCheck(const std::string &clientid, const std::string &username, const std::string &topic, const std::vector<std::string> &subtopics, std::string_view payload,
                                     AclAccess access, uint8_t qos, bool retain, const std::vector<std::pair<std::string, std::string>> *userProperties)
 {
     assert(subtopics.size() > 0);
@@ -375,7 +375,7 @@ AuthResult Authentication::aclCheck(const std::string &clientid, const std::stri
         // gets disconnected.
         try
         {
-            return flashmq_plugin_acl_check_v1(pluginData, access, clientid, username, topic, subtopics, qos, retain, userProperties);
+            return flashmq_plugin_acl_check_v1(pluginData, access, clientid, username, topic, subtopics, payload, qos, retain, userProperties);
         }
         catch (std::exception &ex)
         {

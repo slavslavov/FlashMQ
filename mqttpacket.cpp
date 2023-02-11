@@ -1083,7 +1083,7 @@ void MqttPacket::handleSubscribe()
         std::string shareName;
         parseSubscriptionShare(subtopics, shareName);
 
-        if (authentication.aclCheck(sender->getClientId(), sender->getUsername(), topic, subtopics, AclAccess::subscribe, qos, false, getUserProperties()) == AuthResult::success)
+        if (authentication.aclCheck(sender->getClientId(), sender->getUsername(), topic, subtopics, getPayloadView(), AclAccess::subscribe, qos, false, getUserProperties()) == AuthResult::success)
         {
             deferredSubscribes.emplace_front(topic, subtopics, qos, shareName);
             subs_reponse_codes.push_back(static_cast<ReasonCodes>(qos));
@@ -1595,6 +1595,13 @@ std::string MqttPacket::getPayloadCopy() const
     return payload;
 }
 
+std::string_view MqttPacket::getPayloadView() const
+{
+    assert(payloadStart > 0);
+    assert(pos <= bites.size());
+    std::string_view payload(&bites[payloadStart], payloadLen);
+    return payload;
+}
 
 
 uint8_t MqttPacket::getFixedHeaderLength() const
