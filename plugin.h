@@ -83,9 +83,9 @@ typedef AuthResult(*F_flashmq_plugin_extended_auth_v1)(void *thread_data, const 
                                                             const std::string &authData, const std::vector<std::pair<std::string, std::string>> *userProperties,
                                                             std::string &returnData, std::string &username, const std::weak_ptr<Client> &client);
 typedef bool (*F_flashmq_plugin_alter_subscription_v1)(void *thread_data, const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
-                                                            uint8_t &qos, const std::vector<std::pair<std::string, std::string>> *userProperties);
+                                                            std::string_view payload, uint8_t &qos, const std::vector<std::pair<std::string, std::string>> *userProperties);
 typedef bool (*F_flashmq_plugin_alter_publish_v1)(void *thread_data, const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
-                                                  uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties);
+                                                  std::string_view payload, uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties);
 typedef void (*F_flashmq_plugin_client_disconnected_v1)(void *thread_data, const std::string &clientid);
 typedef void (*F_flashmq_plugin_poll_event_received_v1)(void *thread_data, int fd, int events, const std::weak_ptr<void> &p);
 
@@ -178,9 +178,9 @@ public:
     AuthResult extendedAuth(const std::string &clientid, ExtendedAuthStage stage, const std::string &authMethod,
                             const std::string &authData, const std::vector<std::pair<std::string, std::string>> *userProperties, std::string &returnData,
                             std::string &username, const std::weak_ptr<Client> &client);
-    bool alterSubscribe(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, uint8_t &qos,
+    bool alterSubscribe(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, std::string_view payload, uint8_t &qos,
                         const std::vector<std::pair<std::string, std::string>> *userProperties);
-    bool alterPublish(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
+    bool alterPublish(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, std::string_view payload,
                       uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties);
     void clientDisconnected(const std::string &clientid);
     void fdReady(int fd, int events, const std::weak_ptr<void> &p);

@@ -1074,7 +1074,7 @@ void MqttPacket::handleSubscribe()
         std::vector<std::string> subtopics;
         splitTopic(topic, subtopics);
 
-        if (authentication.alterSubscribe(sender->getClientId(), topic, subtopics, qos, getUserProperties()))
+        if (authentication.alterSubscribe(sender->getClientId(), topic, subtopics, getPayloadView(), qos, getUserProperties()))
             splitTopic(topic, subtopics);
 
         if (topic.empty())
@@ -1334,7 +1334,7 @@ void MqttPacket::handlePublish()
         if (publishData.qos == 2)
             sender->getSession()->addIncomingQoS2MessageId(_packet_id);
 
-        this->alteredByPlugin = authentication.alterPublish(this->publishData.client_id, this->publishData.topic, this->publishData.getSubtopics(), this->publishData.qos,
+        this->alteredByPlugin = authentication.alterPublish(this->publishData.client_id, this->publishData.topic, this->publishData.getSubtopics(), this->publishData.payload, this->publishData.qos,
             this->publishData.retain, this->publishData.getUserProperties());
 
         if (authentication.aclCheck(this->publishData) == AuthResult::success)

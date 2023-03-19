@@ -429,7 +429,7 @@ AuthResult Authentication::extendedAuth(const std::string &clientid, ExtendedAut
     return AuthResult::error;
 }
 
-bool Authentication::alterSubscribe(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, uint8_t &qos,
+bool Authentication::alterSubscribe(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, std::string_view payload, uint8_t &qos,
                                     const std::vector<std::pair<std::string, std::string>> *userProperties)
 {
     if (pluginFamily == PluginFamily::None)
@@ -447,7 +447,7 @@ bool Authentication::alterSubscribe(const std::string &clientid, std::string &to
     {
         try
         {
-            return flashmq_plugin_alter_subscription_v1(pluginData, clientid, topic, subtopics, qos, userProperties);
+            return flashmq_plugin_alter_subscription_v1(pluginData, clientid, topic, subtopics, payload, qos, userProperties);
         }
         catch (std::exception &ex)
         {
@@ -458,7 +458,7 @@ bool Authentication::alterSubscribe(const std::string &clientid, std::string &to
     return false;
 }
 
-bool Authentication::alterPublish(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
+bool Authentication::alterPublish(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, std::string_view payload,
                                   uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties)
 {
     if (pluginFamily == PluginFamily::None)
@@ -476,7 +476,7 @@ bool Authentication::alterPublish(const std::string &clientid, std::string &topi
     {
         try
         {
-            return flashmq_plugin_alter_publish_v1(pluginData, clientid, topic, subtopics, qos, retain, userProperties);
+            return flashmq_plugin_alter_publish_v1(pluginData, clientid, topic, subtopics, payload, qos, retain, userProperties);
         }
         catch (std::exception &ex)
         {
