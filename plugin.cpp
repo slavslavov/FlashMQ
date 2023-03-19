@@ -87,93 +87,40 @@ void *Authentication::loadSymbol(void *handle, const char *symbol, bool exceptio
     return r;
 }
 
-void Authentication::loadPlugin(const std::string &pathToSoFile)
+void Authentication::loadPlugin(const PluginLoader &l)
 {
-    if (pathToSoFile.empty())
+    if (!l.loaded())
         return;
 
-    logger->logf(LOG_NOTICE, "Loading auth plugin %s", pathToSoFile.c_str());
-
     initialized = false;
-    pluginVersion = PluginVersion::Determining;
 
-    if (access(pathToSoFile.c_str(), R_OK) != 0)
+    pluginFamily = l.getPluginFamily();
+    flashmqPluginVersionNumber = l.getFlashMQPluginVersion();
+
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
-        std::ostringstream oss;
-        oss << "Error loading auth plugin: The file " << pathToSoFile << " is not there or not readable";
-        throw FatalError(oss.str());
+        init_v2 = (F_plugin_init_v2)l.loadSymbol( "mosquitto_auth_plugin_init");
+        cleanup_v2 = (F_plugin_cleanup_v2)l.loadSymbol( "mosquitto_auth_plugin_cleanup");
+        security_init_v2 = (F_plugin_security_init_v2)l.loadSymbol("mosquitto_auth_security_init");
+        security_cleanup_v2 = (F_plugin_security_cleanup_v2)l.loadSymbol("mosquitto_auth_security_cleanup");
+        acl_check_v2 = (F_plugin_acl_check_v2)l.loadSymbol("mosquitto_auth_acl_check");
+        unpwd_check_v2 = (F_plugin_unpwd_check_v2)l.loadSymbol("mosquitto_auth_unpwd_check");
+        psk_key_get_v2 = (F_plugin_psk_key_get_v2)l.loadSymbol("mosquitto_auth_psk_key_get");
     }
-
-    void *r = dlopen(pathToSoFile.c_str(), RTLD_LAZY|RTLD_GLOBAL);
-
-    if (r == NULL)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
-        std::string errmsg(dlerror());
-        throw FatalError(errmsg);
-    }
-
-    version = (F_plugin_version)loadSymbol(r, "mosquitto_auth_plugin_version", false);
-    if (version != nullptr)
-    {
-        if (version() != 2)
-        {
-            throw FatalError("Only Mosquitto plugin version 2 is supported at this time.");
-        }
-
-        pluginVersion = PluginVersion::MosquittoV2;
-    }
-    else if ((version = (F_plugin_version)loadSymbol(r, "flashmq_plugin_version", false)) != nullptr)
-    {
-        if (version() != 1)
-        {
-            throw FatalError("FlashMQ plugin only supports version 1.");
-        }
-
-        pluginVersion = PluginVersion::FlashMQv1;
-    }
-    else
-    {
-        throw FatalError("This does not seem to be a FlashMQ native plugin or Mosquitto plugin version 2.");
-    }
-
-    if (dlclose(r) != 0)
-    {
-        std::string errmsg(dlerror());
-        throw FatalError(errmsg);
-    }
-    version = nullptr;
-
-    r = dlopen(pathToSoFile.c_str(), RTLD_NOW|RTLD_GLOBAL);
-
-    if (r == NULL)
-    {
-        std::string errmsg(dlerror());
-        throw FatalError(errmsg);
-    }
-
-    if (pluginVersion == PluginVersion::MosquittoV2)
-    {
-        init_v2 = (F_plugin_init_v2)loadSymbol(r, "mosquitto_auth_plugin_init");
-        cleanup_v2 = (F_plugin_cleanup_v2)loadSymbol(r, "mosquitto_auth_plugin_cleanup");
-        security_init_v2 = (F_plugin_security_init_v2)loadSymbol(r, "mosquitto_auth_security_init");
-        security_cleanup_v2 = (F_plugin_security_cleanup_v2)loadSymbol(r, "mosquitto_auth_security_cleanup");
-        acl_check_v2 = (F_plugin_acl_check_v2)loadSymbol(r, "mosquitto_auth_acl_check");
-        unpwd_check_v2 = (F_plugin_unpwd_check_v2)loadSymbol(r, "mosquitto_auth_unpwd_check");
-        psk_key_get_v2 = (F_plugin_psk_key_get_v2)loadSymbol(r, "mosquitto_auth_psk_key_get");
-    }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
-    {
-        flashmq_plugin_allocate_thread_memory_v1 = (F_flashmq_plugin_allocate_thread_memory_v1)loadSymbol(r, "flashmq_plugin_allocate_thread_memory");
-        flashmq_plugin_deallocate_thread_memory_v1 = (F_flashmq_plugin_deallocate_thread_memory_v1)loadSymbol(r, "flashmq_plugin_deallocate_thread_memory");
-        flashmq_plugin_init_v1 = (F_flashmq_plugin_init_v1)loadSymbol(r, "flashmq_plugin_init");
-        flashmq_plugin_deinit_v1 = (F_flashmq_plugin_deinit_v1)loadSymbol(r, "flashmq_plugin_deinit");
-        flashmq_plugin_acl_check_v1 = (F_flashmq_plugin_acl_check_v1)loadSymbol(r, "flashmq_plugin_acl_check");
-        flashmq_plugin_login_check_v1 = (F_flashmq_plugin_login_check_v1)loadSymbol(r, "flashmq_plugin_login_check");
-        flashmq_plugin_periodic_event_v1 = (F_flashmq_plugin_periodic_event_v1)loadSymbol(r, "flashmq_plugin_periodic_event", false);
-        flashmq_plugin_extended_auth_v1 = (F_flashmq_plugin_extended_auth_v1)loadSymbol(r, "flashmq_plugin_extended_auth", false);
-        flashmq_plugin_alter_subscription_v1 = (F_flashmq_plugin_alter_subscription_v1)loadSymbol(r, "flashmq_plugin_alter_subscription", false);
-        flashmq_plugin_alter_publish_v1 = (F_flashmq_plugin_alter_publish_v1)loadSymbol(r, "flashmq_plugin_alter_publish", false);
-        flashmq_plugin_client_disconnected_v1 = (F_flashmq_plugin_client_disconnected_v1)loadSymbol(r, "flashmq_plugin_client_disconnected", false);
+        flashmq_plugin_allocate_thread_memory_v1 = (F_flashmq_plugin_allocate_thread_memory_v1)l.loadSymbol("flashmq_plugin_allocate_thread_memory");
+        flashmq_plugin_deallocate_thread_memory_v1 = (F_flashmq_plugin_deallocate_thread_memory_v1)l.loadSymbol("flashmq_plugin_deallocate_thread_memory");
+        flashmq_plugin_init_v1 = (F_flashmq_plugin_init_v1)l.loadSymbol("flashmq_plugin_init");
+        flashmq_plugin_deinit_v1 = (F_flashmq_plugin_deinit_v1)l.loadSymbol("flashmq_plugin_deinit");
+        flashmq_plugin_acl_check_v1 = (F_flashmq_plugin_acl_check_v1)l.loadSymbol("flashmq_plugin_acl_check");
+        flashmq_plugin_login_check_v1 = (F_flashmq_plugin_login_check_v1)l.loadSymbol("flashmq_plugin_login_check");
+        flashmq_plugin_periodic_event_v1 = (F_flashmq_plugin_periodic_event_v1)l.loadSymbol("flashmq_plugin_periodic_event", false);
+        flashmq_plugin_extended_auth_v1 = (F_flashmq_plugin_extended_auth_v1)l.loadSymbol("flashmq_plugin_extended_auth", false);
+        flashmq_plugin_alter_subscription_v1 = (F_flashmq_plugin_alter_subscription_v1)l.loadSymbol("flashmq_plugin_alter_subscription", false);
+        flashmq_plugin_alter_publish_v1 = (F_flashmq_plugin_alter_publish_v1)l.loadSymbol("flashmq_plugin_alter_publish", false);
+        flashmq_plugin_client_disconnected_v1 = (F_flashmq_plugin_client_disconnected_v1)l.loadSymbol("flashmq_plugin_client_disconnected", false);
+        flashmq_plugin_poll_event_received_v1 = (F_flashmq_plugin_poll_event_received_v1)l.loadSymbol("flashmq_plugin_poll_event_received", false);
     }
     else
     {
@@ -189,7 +136,7 @@ void Authentication::loadPlugin(const std::string &pathToSoFile)
  */
 void Authentication::init()
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return;
 
     UnscopedLock lock(initMutex);
@@ -199,14 +146,14 @@ void Authentication::init()
     if (quitting)
         return;
 
-    if (pluginVersion == PluginVersion::MosquittoV2)
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
         AuthOptCompatWrap &authOpts = settings.getAuthOptsCompat();
         int result = init_v2(&pluginData, authOpts.head(), authOpts.size());
         if (result != 0)
             throw FatalError("Error initialising auth plugin.");
     }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
         std::unordered_map<std::string, std::string> &authOpts = settings.getFlashmqpluginOpts();
         flashmq_plugin_allocate_thread_memory_v1(&pluginData, authOpts);
@@ -215,7 +162,7 @@ void Authentication::init()
 
 void Authentication::cleanup()
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return;
 
     logger->logf(LOG_INFO, "Cleaning up authentication.");
@@ -226,14 +173,14 @@ void Authentication::cleanup()
     if (settings.pluginSerializeInit)
         lock.lock();
 
-    if (pluginVersion == PluginVersion::MosquittoV2)
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
         AuthOptCompatWrap &authOpts = settings.getAuthOptsCompat();
         int result = cleanup_v2(pluginData, authOpts.head(), authOpts.size());
         if (result != 0)
             logger->logf(LOG_ERR, "Error cleaning up auth plugin"); // Not doing exception, because we're shutting down anyway.
     }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
         try
         {
@@ -253,7 +200,7 @@ void Authentication::cleanup()
  */
 void Authentication::securityInit(bool reloading)
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return;
 
     UnscopedLock lock(initMutex);
@@ -263,7 +210,7 @@ void Authentication::securityInit(bool reloading)
     if (quitting)
         return;
 
-    if (pluginVersion == PluginVersion::MosquittoV2)
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
         AuthOptCompatWrap &authOpts = settings.getAuthOptsCompat();
         int result = security_init_v2(pluginData, authOpts.head(), authOpts.size(), reloading);
@@ -272,8 +219,9 @@ void Authentication::securityInit(bool reloading)
             throw pluginException("Plugin function mosquitto_auth_security_init returned an error. If it didn't log anything, we don't know what it was.");
         }
     }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
+        // The exception handling is higher up in the call stack, because it needs to be different on first start vs reload.
         std::unordered_map<std::string, std::string> &authOpts = settings.getFlashmqpluginOpts();
         flashmq_plugin_init_v1(pluginData, authOpts, reloading);
     }
@@ -285,7 +233,7 @@ void Authentication::securityInit(bool reloading)
 
 void Authentication::securityCleanup(bool reloading)
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return;
 
     initialized = false;
@@ -294,7 +242,7 @@ void Authentication::securityCleanup(bool reloading)
     if (settings.pluginSerializeInit)
         lock.lock();
 
-    if (pluginVersion == PluginVersion::MosquittoV2)
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
         AuthOptCompatWrap &authOpts = settings.getAuthOptsCompat();
         int result = security_cleanup_v2(pluginData, authOpts.head(), authOpts.size(), reloading);
@@ -304,8 +252,9 @@ void Authentication::securityCleanup(bool reloading)
             throw pluginException("Plugin function mosquitto_auth_security_cleanup returned an error. If it didn't log anything, we don't know what it was.");
         }
     }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
+        // The exception handling is higher up in the call stack, because it needs to be different on first start vs reload.
         std::unordered_map<std::string, std::string> &authOpts = settings.getFlashmqpluginOpts();
         flashmq_plugin_deinit_v1(pluginData, authOpts, reloading);
     }
@@ -336,7 +285,7 @@ AuthResult Authentication::aclCheck(const std::string &clientid, const std::stri
     if (firstResult != AuthResult::success)
         return firstResult;
 
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return firstResult;
 
     if (!initialized)
@@ -349,7 +298,7 @@ AuthResult Authentication::aclCheck(const std::string &clientid, const std::stri
     if (settings.pluginSerializeAuthChecks)
         lock.lock();
 
-    if (pluginVersion == PluginVersion::MosquittoV2)
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
         // We have to do this, because Mosquitto plugin v2 has no notion of checking subscribes.
         if (access == AclAccess::subscribe)
@@ -369,7 +318,7 @@ AuthResult Authentication::aclCheck(const std::string &clientid, const std::stri
 
         return result_;
     }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
         // I'm using this try/catch because propagating the exception higher up conflicts with who gets the blame, and then the publisher
         // gets disconnected.
@@ -395,7 +344,7 @@ AuthResult Authentication::unPwdCheck(const std::string &clientid, const std::st
     if (firstResult == AuthResult::success)
         return firstResult;
 
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return firstResult;
 
     if (!initialized)
@@ -408,7 +357,7 @@ AuthResult Authentication::unPwdCheck(const std::string &clientid, const std::st
     if (settings.pluginSerializeAuthChecks)
         lock.lock();
 
-    if (pluginVersion == PluginVersion::MosquittoV2)
+    if (pluginFamily == PluginFamily::MosquittoV2)
     {
         int result = unpwd_check_v2(pluginData, username.c_str(), password.c_str());
         AuthResult r = static_cast<AuthResult>(result);
@@ -420,7 +369,7 @@ AuthResult Authentication::unPwdCheck(const std::string &clientid, const std::st
 
         return r;
     }
-    else if (pluginVersion == PluginVersion::FlashMQv1)
+    else if (pluginFamily == PluginFamily::FlashMQ)
     {
         // I'm using this try/catch because propagating the exception higher up conflicts with who gets the blame, and then the publisher
         // gets disconnected.
@@ -442,7 +391,7 @@ AuthResult Authentication::extendedAuth(const std::string &clientid, ExtendedAut
                                         const std::string &authData, const std::vector<std::pair<std::string, std::string>> *userProperties,
                                         std::string &returnData, std::string &username, const std::weak_ptr<Client> &client)
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return AuthResult::auth_method_not_supported;
 
     if (!initialized)
@@ -455,7 +404,7 @@ AuthResult Authentication::extendedAuth(const std::string &clientid, ExtendedAut
     if (settings.pluginSerializeAuthChecks)
         lock.lock();
 
-    if (pluginVersion == PluginVersion::FlashMQv1)
+    if (pluginFamily == PluginFamily::FlashMQ)
     {
         if (!flashmq_plugin_extended_auth_v1)
             return AuthResult::auth_method_not_supported;
@@ -472,7 +421,7 @@ AuthResult Authentication::extendedAuth(const std::string &clientid, ExtendedAut
             logger->logf(LOG_WARNING, "Throwing exceptions from auth plugin login/ACL checks is slow. There's no need.");
         }
     }
-    else if (pluginVersion == PluginVersion::MosquittoV2)
+    else if (pluginFamily == PluginFamily::MosquittoV2)
     {
         throw ProtocolError("Mosquitto v2 plugin doesn't support extended auth.", ReasonCodes::BadAuthenticationMethod);
     }
@@ -483,7 +432,7 @@ AuthResult Authentication::extendedAuth(const std::string &clientid, ExtendedAut
 bool Authentication::alterSubscribe(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics, uint8_t &qos,
                                     const std::vector<std::pair<std::string, std::string>> *userProperties)
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
     {
         return false;
     }
@@ -494,9 +443,16 @@ bool Authentication::alterSubscribe(const std::string &clientid, std::string &to
         return false;
     }
 
-    if (pluginVersion == PluginVersion::FlashMQv1 && flashmq_plugin_alter_subscription_v1)
+    if (pluginFamily == PluginFamily::FlashMQ && flashmq_plugin_alter_subscription_v1)
     {
-        return flashmq_plugin_alter_subscription_v1(pluginData, clientid, topic, subtopics, qos, userProperties);
+        try
+        {
+            return flashmq_plugin_alter_subscription_v1(pluginData, clientid, topic, subtopics, qos, userProperties);
+        }
+        catch (std::exception &ex)
+        {
+            logger->logf(LOG_ERR, "Exception in 'flashmq_plugin_alter_subscription': '%s'. You now have undefined behavior.", ex.what());
+        }
     }
 
     return false;
@@ -505,7 +461,7 @@ bool Authentication::alterSubscribe(const std::string &clientid, std::string &to
 bool Authentication::alterPublish(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
                                   uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties)
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
     {
         return false;
     }
@@ -516,9 +472,16 @@ bool Authentication::alterPublish(const std::string &clientid, std::string &topi
         return false;
     }
 
-    if (pluginVersion == PluginVersion::FlashMQv1 && flashmq_plugin_alter_publish_v1)
+    if (pluginFamily == PluginFamily::FlashMQ && flashmq_plugin_alter_publish_v1)
     {
-        return flashmq_plugin_alter_publish_v1(pluginData, clientid, topic, subtopics, qos, retain, userProperties);
+        try
+        {
+            return flashmq_plugin_alter_publish_v1(pluginData, clientid, topic, subtopics, qos, retain, userProperties);
+        }
+        catch (std::exception &ex)
+        {
+            logger->logf(LOG_ERR, "Exception in 'flashmq_plugin_alter_publish': '%s'. You now have undefined behavior.", ex.what());
+        }
     }
 
     return false;
@@ -526,7 +489,7 @@ bool Authentication::alterPublish(const std::string &clientid, std::string &topi
 
 void Authentication::clientDisconnected(const std::string &clientid)
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
     {
         return;
     }
@@ -537,9 +500,42 @@ void Authentication::clientDisconnected(const std::string &clientid)
         return;
     }
 
-    if (pluginVersion == PluginVersion::FlashMQv1 && flashmq_plugin_client_disconnected_v1)
+    if (pluginFamily == PluginFamily::FlashMQ && flashmq_plugin_client_disconnected_v1)
     {
-        flashmq_plugin_client_disconnected_v1(pluginData, clientid);
+        try
+        {
+            flashmq_plugin_client_disconnected_v1(pluginData, clientid);
+        }
+        catch (std::exception &ex)
+        {
+            logger->logf(LOG_ERR, "Exception in 'flashmq_plugin_client_disconnected': '%s'.", ex.what());
+        }
+    }
+}
+
+void Authentication::fdReady(int fd, int events, const std::weak_ptr<void> &p)
+{
+    if (pluginFamily == PluginFamily::None)
+    {
+        return;
+    }
+
+    if (!initialized)
+    {
+        logger->logf(LOG_ERR, "Plugin fdReady called, but initialization failed or not performed.");
+        return;
+    }
+
+    if (pluginFamily == PluginFamily::FlashMQ && flashmq_plugin_poll_event_received_v1)
+    {
+        try
+        {
+            flashmq_plugin_poll_event_received_v1(pluginData, fd, events, p);
+        }
+        catch (std::exception &ex)
+        {
+            logger->logf(LOG_ERR, "In 'flashmq_plugin_poll_event_v1(): '", ex.what());
+        }
     }
 }
 
@@ -810,7 +806,7 @@ AuthResult Authentication::unPwdCheckFromMosquittoPasswordFile(const std::string
 
 void Authentication::periodicEvent()
 {
-    if (pluginVersion == PluginVersion::None)
+    if (pluginFamily == PluginFamily::None)
         return;
 
     if (!initialized)
@@ -819,9 +815,16 @@ void Authentication::periodicEvent()
         return;
     }
 
-    if (pluginVersion == PluginVersion::FlashMQv1 && flashmq_plugin_periodic_event_v1)
+    if (pluginFamily == PluginFamily::FlashMQ && flashmq_plugin_periodic_event_v1)
     {
-        flashmq_plugin_periodic_event_v1(pluginData);
+        try
+        {
+            flashmq_plugin_periodic_event_v1(pluginData);
+        }
+        catch (std::exception &ex)
+        {
+            logger->logf(LOG_ERR, "Exception in 'flashmq_plugin_periodic_event': '%s'.", ex.what());
+        }
     }
 }
 

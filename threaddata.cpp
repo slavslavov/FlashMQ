@@ -37,7 +37,8 @@ AsyncAuth::AsyncAuth(std::weak_ptr<Client> client, AuthResult result, const std:
 
 }
 
-ThreadData::ThreadData(int threadnr, const Settings &settings) :
+ThreadData::ThreadData(int threadnr, const Settings &settings, const PluginLoader &pluginLoader) :
+    pluginLoader(pluginLoader),
     settingsLocalCopy(settings),
     authentication(settingsLocalCopy),
     threadnr(threadnr)
@@ -602,6 +603,43 @@ void ThreadData::queueSendDisconnects()
     wakeUpThread();
 }
 
+void ThreadData::pollExternalFd(int fd, uint32_t events, const std::weak_ptr<void> &p)
+{
+    int mode = EPOLL_CTL_MOD;
+    auto pos = externalFds.find(fd);
+    if (pos == externalFds.end())
+    {
+        externalFds[fd] = p;
+        mode = EPOLL_CTL_ADD;
+    }
+
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof (struct epoll_event));
+    ev.data.fd = fd;
+    ev.events = events;
+    check<std::runtime_error>(epoll_ctl(this->epollfd, mode, fd, &ev));
+}
+
+void ThreadData::pollExternalRemove(int fd)
+{
+    this->externalFds.erase(fd);
+    if (epoll_ctl(this->epollfd, EPOLL_CTL_DEL, fd, NULL) != 0)
+    {
+        Logger *logger = Logger::getInstance();
+        logger->logf(LOG_ERR, "Removing externally watched fd %d from epoll produced error: %s", fd, strerror(errno));
+    }
+}
+
+uint32_t ThreadData::addTask(std::function<void ()> f, uint32_t delayMs)
+{
+    return delayedTasks.addTask(f, delayMs);
+}
+
+void ThreadData::removeTask(uint32_t id)
+{
+    delayedTasks.eraseTask(id);
+}
+
 void ThreadData::doKeepAliveCheck()
 {
     logger->logf(LOG_DEBUG, "doKeepAliveCheck in thread %d", threadnr);
@@ -686,7 +724,7 @@ void ThreadData::initplugin()
 {
     authentication.loadMosquittoPasswordFile();
     authentication.loadMosquittoAclFile();
-    authentication.loadPlugin(settingsLocalCopy.pluginPath);
+    authentication.loadPlugin(pluginLoader);
     authentication.init();
     authentication.securityInit(false);
 }

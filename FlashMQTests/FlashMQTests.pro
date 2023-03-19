@@ -59,9 +59,15 @@ SOURCES +=  tst_maintests.cpp \
     ../network.cpp \
     ../subscription.cpp \
     ../sharedsubscribers.cpp \
+    ../pluginloader.cpp \
+    ../queuedtasks.cpp \
     conffiletemp.cpp \
     flashmqtempdir.cpp \
-    mainappthread.cpp
+    mainappthread.cpp \
+    plugintests.cpp \
+    retaintests.cpp \
+    sharedsubscriptionstests.cpp \
+    willtests.cpp
 
 
 HEADERS += \
@@ -112,9 +118,12 @@ HEADERS += \
     ../network.h \
     ../subscription.h \
     ../sharedsubscribers.h \
+    ../pluginloader.h \
+    ../queuedtasks.h \
     conffiletemp.h \
     flashmqtempdir.h \
-    mainappthread.h
+    mainappthread.h \
+    tst_maintests.h
 
 LIBS += -ldl -lssl -lcrypto -lresolv
 

@@ -402,6 +402,10 @@ void MqttPacket::bufferToMqttPackets(CirBuf &buf, std::vector<MqttPacket> &packe
 
 void MqttPacket::handle()
 {
+    // For clients that send packets before they even receive a connack.
+    if (protocolVersion == ProtocolVersion::None)
+        protocolVersion = sender->getProtocolVersion();
+
     // It may be a stale client. This is especially important for when a session is picked up by another client. The old client
     // may still have stale data in the buffer, causing action on the session otherwise.
     if (sender->isBeingDisconnected())
@@ -1063,7 +1067,9 @@ void MqttPacket::handleSubscribe()
     while (remainingAfterPos() > 0)
     {
         std::string topic = readBytesToString(true);
-        uint8_t qos = readUint8();
+
+        const uint8_t subscriptionOptions = readUint8();
+        uint8_t qos = subscriptionOptions & 0x03;
 
         std::vector<std::string> subtopics;
         splitTopic(topic, subtopics);
@@ -1777,6 +1783,7 @@ uint32_t MqttPacket::readFourBytesToUint32()
 
 size_t MqttPacket::remainingAfterPos()
 {
+    assert(pos <= bites.size());
     return bites.size() - pos;
 }
 

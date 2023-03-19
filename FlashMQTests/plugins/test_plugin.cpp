@@ -1,8 +1,15 @@
 #include "functional"
 #include <unistd.h>
+#include <cassert>
+#include <cstring>
+#include <stdexcept>
 
 #include "../../flashmq_plugin.h"
 #include "test_plugin.h"
+
+#include <curl/curl.h>
+#include <sys/epoll.h>
+#include "curlfunctions.h"
 
 
 TestPluginData::~TestPluginData()
@@ -26,15 +33,55 @@ int flashmq_plugin_version()
 
 void flashmq_plugin_allocate_thread_memory(void **thread_data, std::unordered_map<std::string, std::string> &plugin_opts)
 {
-    *thread_data = new TestPluginData();
+    TestPluginData *p = new TestPluginData();
+    *thread_data = p;
     (void)plugin_opts;
+
+    p->curlMulti = curl_multi_init();
+
+    if (p->curlMulti == nullptr)
+        throw std::runtime_error("Curl failed to init");
+
+    curl_multi_setopt(p->curlMulti, CURLMOPT_SOCKETFUNCTION, socket_event_watch_notification);
+    curl_multi_setopt(p->curlMulti, CURLMOPT_TIMERFUNCTION, timer_callback);
+    curl_multi_setopt(p->curlMulti, CURLMOPT_TIMERDATA, p);
+
 }
 
 void flashmq_plugin_deallocate_thread_memory(void *thread_data, std::unordered_map<std::string, std::string> &plugin_opts)
 {
-    TestPluginData *p = static_cast<TestPluginData*>(thread_data);
-    delete p;
     (void)plugin_opts;
+
+    TestPluginData *p = static_cast<TestPluginData*>(thread_data);
+
+    curl_multi_cleanup(p->curlMulti);
+
+    delete p;
+}
+
+void flashmq_plugin_poll_event_received(void *thread_data, int fd, uint32_t events, const std::weak_ptr<void> &ptr)
+{
+    (void)ptr;
+
+    TestPluginData *p = static_cast<TestPluginData*>(thread_data);
+
+    int new_events = CURL_CSELECT_ERR;
+
+    if (events & EPOLLIN)
+    {
+        new_events &= ~CURL_CSELECT_ERR;
+        new_events |= CURL_CSELECT_IN;
+    }
+    if (events & EPOLLOUT)
+    {
+        new_events &= ~CURL_CSELECT_ERR;
+        new_events |= CURL_CSELECT_OUT;
+    }
+
+    int n = -1;
+    curl_multi_socket_action(p->curlMulti, fd, new_events, &n);
+
+    check_all_active_curls(p->curlMulti);
 }
 
 void flashmq_plugin_init(void *thread_data, std::unordered_map<std::string, std::string> &plugin_opts, bool reloading)
@@ -42,6 +89,11 @@ void flashmq_plugin_init(void *thread_data, std::unordered_map<std::string, std:
     (void)thread_data;
     (void)plugin_opts;
     (void)reloading;
+
+    TestPluginData *p = static_cast<TestPluginData*>(thread_data);
+
+    if (plugin_opts.find("main_init was here") != plugin_opts.end())
+        p->main_init_ran = true;
 }
 
 void flashmq_plugin_deinit(void *thread_data, std::unordered_map<std::string, std::string> &plugin_opts, bool reloading)
@@ -49,7 +101,6 @@ void flashmq_plugin_deinit(void *thread_data, std::unordered_map<std::string, st
     (void)thread_data;
     (void)plugin_opts;
     (void)reloading;
-
 }
 
 void flashmq_plugin_periodic_event(void *thread_data)
@@ -95,6 +146,29 @@ AuthResult flashmq_plugin_login_check(void *thread_data, const std::string &clie
         {
             flashmq_publish_message("getaddresstest/family", 0, false, "AF_INET");
         }
+    }
+
+    if (username == "curl")
+    {
+        TestPluginData *p = static_cast<TestPluginData*>(thread_data);
+
+        // Libcurl is C, so we unfortunately have to use naked new and hope we'll delete it in all the right places.
+        AuthenticatingClient *c = new AuthenticatingClient;
+        c->client = client;
+        c->globalData = p;
+
+        curl_easy_setopt(c->eh, CURLOPT_WRITEFUNCTION, curl_write_cb);
+        curl_easy_setopt(c->eh, CURLOPT_WRITEDATA, c);
+        curl_easy_setopt(c->eh, CURLOPT_PRIVATE, c);
+
+        // Keep in mind that DNS resovling may be blocking too. You could perhaps resolve the DNS once and use the result.
+        curl_easy_setopt(c->eh, CURLOPT_URL, "http://www.google.com/");
+
+        // TODO: I don't like this error handling.
+        if (!c->addToMulti(p->curlMulti))
+            delete c;
+
+        return AuthResult::async;
     }
 
     return AuthResult::success;
@@ -189,10 +263,18 @@ bool flashmq_plugin_alter_publish(void *thread_data, const std::string &clientid
     (void)retain;
     (void)userProperties;
 
+    TestPluginData *p = static_cast<TestPluginData*>(thread_data);
+
     if (topic == "changeme")
     {
         topic = "changed";
         qos = 2;
+        return true;
+    }
+
+    if (topic == "check_main_init_presence" && p->main_init_ran)
+    {
+        topic = "check_main_init_presence_confirmed";
         return true;
     }
 
@@ -207,3 +289,55 @@ void flashmq_plugin_client_disconnected(void *thread_data, const std::string &cl
     flashmq_publish_message("disconnect/confirmed", 0, false, "adsf");
 }
 
+void flashmq_plugin_main_init(std::unordered_map<std::string, std::string> &plugin_opts)
+{
+    (void)plugin_opts;
+
+    flashmq_logf(LOG_INFO, "The tester was here.");
+
+    // The plugin_opts aren't const. I don't know if that was a mistake or not anymore, but it works in my favor now.
+    plugin_opts["main_init was here"] = "true";
+
+    if (curl_global_init(CURL_GLOBAL_ALL) != 0)
+        throw std::runtime_error("Global curl init failed to init");
+}
+
+void flashmq_plugin_main_deinit(std::unordered_map<std::string, std::string> &plugin_opts)
+{
+    (void)plugin_opts;
+
+    curl_global_cleanup();
+}
+
+void AuthenticatingClient::cleanup()
+{
+    if (curlMulti)
+    {
+        curl_multi_remove_handle(curlMulti, eh);
+        curlMulti = nullptr;
+    }
+
+    curl_easy_cleanup(eh);
+    eh = nullptr;
+}
+
+AuthenticatingClient::AuthenticatingClient()
+{
+    eh = curl_easy_init();
+}
+
+AuthenticatingClient::~AuthenticatingClient()
+{
+    cleanup();
+}
+
+bool AuthenticatingClient::addToMulti(CURLM *curlMulti)
+{
+    if (curl_multi_add_handle(curlMulti, eh) != CURLM_OK)
+    {
+        cleanup();
+        return false;
+    }
+    this->curlMulti = curlMulti;
+    return true;
+}

@@ -28,6 +28,7 @@ License along with FlashMQ. If not, see <https://www.gnu.org/licenses/>.
 #include "configfileparser.h"
 #include "acltree.h"
 #include "flashmq_plugin.h"
+#include "pluginloader.h"
 
 enum class PasswordHashType
 {
@@ -58,8 +59,6 @@ struct MosquittoPasswordFileEntry
     //MosquittoPasswordFileEntry(const MosquittoPasswordFileEntry &other) = delete;
 };
 
-typedef int (*F_plugin_version)(void);
-
 // Mosquitto functions
 typedef int (*F_plugin_init_v2)(void **, struct mosquitto_auth_opt *, int);
 typedef int (*F_plugin_cleanup_v2)(void *, struct mosquitto_auth_opt *, int);
@@ -88,20 +87,13 @@ typedef bool (*F_flashmq_plugin_alter_subscription_v1)(void *thread_data, const 
 typedef bool (*F_flashmq_plugin_alter_publish_v1)(void *thread_data, const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
                                                   uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties);
 typedef void (*F_flashmq_plugin_client_disconnected_v1)(void *thread_data, const std::string &clientid);
+typedef void (*F_flashmq_plugin_poll_event_received_v1)(void *thread_data, int fd, int events, const std::weak_ptr<void> &p);
 
 extern "C"
 {
     // Gets called by the plugin, so it needs to exist, globally
     void mosquitto_log_printf(int level, const char *fmt, ...);
 }
-
-enum class PluginVersion
-{
-    None,
-    Determining,
-    FlashMQv1,
-    MosquittoV2,
-};
 
 std::string AuthResultToString(AuthResult r);
 
@@ -112,8 +104,6 @@ std::string AuthResultToString(AuthResult r);
  */
 class Authentication
 {
-    F_plugin_version version = nullptr;
-
     // Mosquitto functions
     F_plugin_init_v2 init_v2 = nullptr;
     F_plugin_cleanup_v2 cleanup_v2 = nullptr;
@@ -134,16 +124,19 @@ class Authentication
     F_flashmq_plugin_alter_subscription_v1 flashmq_plugin_alter_subscription_v1 = nullptr;
     F_flashmq_plugin_alter_publish_v1 flashmq_plugin_alter_publish_v1 = nullptr;
     F_flashmq_plugin_client_disconnected_v1 flashmq_plugin_client_disconnected_v1 = nullptr;
+    F_flashmq_plugin_poll_event_received_v1 flashmq_plugin_poll_event_received_v1 = nullptr;
 
     static std::mutex initMutex;
     static std::mutex authChecksMutex;
+
+    PluginFamily pluginFamily = PluginFamily::None;
+    int flashmqPluginVersionNumber = 0;
 
     Settings &settings; // A ref because I want it to always be the same as the thread's settings
 
     void *pluginData = nullptr;
     Logger *logger = nullptr;
     bool initialized = false;
-    PluginVersion pluginVersion = PluginVersion::None;
     bool quitting = false;
 
     /**
@@ -172,7 +165,7 @@ public:
     Authentication(Authentication &&other) = delete;
     ~Authentication();
 
-    void loadPlugin(const std::string &pathToSoFile);
+    void loadPlugin(const PluginLoader &l);
     void init();
     void cleanup();
     void securityInit(bool reloading);
@@ -190,6 +183,7 @@ public:
     bool alterPublish(const std::string &clientid, std::string &topic, const std::vector<std::string> &subtopics,
                       uint8_t &qos, bool &retain, std::vector<std::pair<std::string, std::string>> *userProperties);
     void clientDisconnected(const std::string &clientid);
+    void fdReady(int fd, int events, const std::weak_ptr<void> &p);
 
     void setQuitting();
     void loadMosquittoPasswordFile();
